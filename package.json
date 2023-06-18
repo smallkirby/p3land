@@ -1,6 +1,7 @@
 {
   "scripts": {
-    "dev": "hugo server"
+    "dev": "hugo server",
+    "ci-build": "npm ci && hugo --gc --minify"
   },
   "devDependencies": {
     "autoprefixer": "^10.4.14",
