@@ -1,6 +1,6 @@
 ---
-name: Enhancement
-about: 既存の機能の修正提案提案用のテンプレートです。
+name: Report
+about: 誤り・typo等の報告用テンプレートぽよ。
 title: ':memo: '
 labels: 'report'
 assignees: 'smallkirby'
