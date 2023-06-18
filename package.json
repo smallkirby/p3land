@@ -3,7 +3,7 @@
     "dev": "hugo server",
     "ci-build": "npm ci && hugo --gc --minify"
   },
-  "devDependencies": {
+  "dependencies": {
     "autoprefixer": "^10.4.14",
     "postcss": "^8.4.24",
     "postcss-cli": "^10.1.0"
