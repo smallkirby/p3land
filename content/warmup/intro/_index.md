@@ -23,6 +23,12 @@ weight: 20
 tar xvf ./simplest-<SHA256>.tar.gz
 ```
 
+また、リモートサーバに繋ぐことができるかどうかも以下のコマンドで確認してください:
+
+```bash
+nc sc.skb.pw 30009
+```
+
 {{< alert title="Warning: Challengeファイルの安全性" color="warning" >}}
 CTF等では、運営が用意したファイルをダウンロードして実行することになります。
 CTFをやっているような人間が全員倫理的でsafeな人間であることは保証できないため、知らない人から渡されたファイルはしっかり事前に確認してください。
@@ -366,6 +372,11 @@ gef> x/2gx $rbp - 0x140
 さて、ローカルでexploitが動いたので実際にリモートサーバに攻撃してみましょう。
 
 上記のテンプレートを利用している場合には、`hosts / ports`をリモートサーバのものに変更したあと、以下のように`r`を引数に渡して実行するとリモートサーバに繋げることができます:
+
+```py
+hosts = ("sc.skb.pw", "localhost", "localhost") # EDIT HERE
+ports = (30009, 12300, 23947) # EDIT HERE
+```
 
 ```bash
 ./exploit.py r
