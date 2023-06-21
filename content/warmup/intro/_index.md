@@ -15,7 +15,7 @@ weight: 20
 
 ## Challengeのダウンロード
 
-このリンクからChallengeをダウンロードします: [DOWNLOAD](https://r2.p3land.smallkirby.com/simplest-2b5b9ba7ba6830e20fc122363bc227b2dedc7abe279961651346e277473677be.tar.gz).
+このリンクからChallengeをダウンロードします: [DOWNLOAD](https://r2.p3land.smallkirby.com/simplest-236eb507c328828fe02fcb765b0c752950f1013b96743b5aefb057ac873ebe10.tar.gz).
 
 ダウンロード後、以下のコマンドでファイルを展開してください:
 
