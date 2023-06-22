@@ -10,6 +10,7 @@ menu:
 weight: 40
 ---
 
-## 🎀 助けてくれたP3ランドのお友達
+## 🎀 P3ランドのお友達
 
-TBD
+- 🐱 [@kcz146](https://twitter.com/kcz146): ぽへぽへ大臣
+- 🐶 [nirugiri](https://twitter.com/smallkirby): ぼくの頭の中の犬、柴とハスキーのミックス
