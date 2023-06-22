@@ -292,6 +292,24 @@ libcbaseのアドレスが`0x7f96cac00000`であり、`__strcpy_avx2`のアド�
 そのような場合には、配布ファイルに`libc.so`と`ld.so`が配布されています。
 実行時には`LD_PRELOAD=$(realpath ./libc.so) ./ld.so ./challenge`のようにすることで
 指定されたlibcをロードすることが可能になります。
+個人的には`readelf`等のツールでELFヘッダ中のローダ情報を書き換えてしまうのが良いと思います。
+
+Kernelの講義なので少しKernelの話をすると、PIEバイナリは実行時に以下のベースアドレスらへんにロードされます
+([/arch/x86/include/asm/elf.h](https://elixir.bootlin.com/linux/latest/source/arch/x86/include/asm/elf.h#L237)):
+
+```c
+#define ELF_ET_DYN_BASE		(mmap_is_ia32() ? 0x000400000UL : \
+						  (DEFAULT_MAP_WINDOW / 3 * 2))
+```
+
+計算すると、`0x555555554aaa`という見慣れた値になります。
+実際にはこれにバイアスとしてアーキ固有の乱数が加算されます。
+x64の場合には8bitの乱数をページ分だけシフトした値です([/mm/util.c](https://elixir.bootlin.com/linux/latest/source/mm/util.c#L379))
+これが加算されて皆さんのもとにお届けされます。
+農家の方には感謝しないといけないですね。
+
+この辺のELFファイルのロードについては、[/fs/binfmt_elf.c](https://elixir.bootlin.com/linux/latest/source/fs/binfmt_elf.c#L823)らへんを中心に読んだり、[@smallkirbyが書いた概要](https://github.com/smallkirby/kernelpwn/blob/master/technique/modprobe_path.md#determine-binary-format)を読むと良いかもしれないです。
+少し話が逸れましたが、こういう気になることはコードを読むと分かるので調べる癖をつけると世界が平和になります。
 {{< /alert >}}
 
 ## libc内のgadgetを使ったROP
@@ -367,7 +385,7 @@ libc内にonegadgetが存在する場合、ROPをする必要すらなくなり�
 onegadgetのアドレスとその制約を調べるには [OneGadget](https://github.com/david942j/one_gadget) というツールがおすすめです:
 
 ```sh
-[i]<0> $ one_gadget ./libc-2.35.so | head -n8
+$ one_gadget ./libc-2.35.so | head -n8
 0x50a37 posix_spawn(rsp+0x1c, "/bin/sh", 0, rbp, rsp+0x60, environ)
 constraints:
   rsp & 0xf == 0
