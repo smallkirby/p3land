@@ -141,7 +141,7 @@ FSAは、条件が揃えばRWのどちらも獲得可能な攻撃手法です。
 例としては、Heap Exploitテクニックの1種である [House of Corrosion](https://smallkirby.hatenablog.com/entry/2020/02/24/210633) が挙げられます。
 {{< /alert >}}
 
-## FSAでのleak
+## FSAでのREADプリミティブ
 
 ### .textベースのleak
 
@@ -315,7 +315,7 @@ Welcome to EchoServer...!
 スタックのアドレスも実行ごとに変わりますが、ここでleakしたアドレスと`main`のスタック上端のアドレスの差分は実行ごとに不変です。
 今回は差分が `0x7fffffffe320 - 0x7fffffffe1f0 == 0x130` であるため、leakしたアドレスから`0x130`を引くことで常に`main`のスタック上端アドレスを得ることができます。
 
-## FSAでのWrite
+## FSAでのWRITEプリミティブ
 
 さて、ここまででleakができたので次は書き込みです。
 
