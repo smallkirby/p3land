@@ -183,7 +183,7 @@ gef> c
 $rdi   : 0x00007fffffffe1f0  ->  'ABCDEFGHIJK'
 ```
 
-アドレスをリークするにあたって知りたいのは、`main`, `win`, `loop`などの`.txt`セクション内にある関数のアドレスです。
+アドレスをリークするにあたって知りたいのは、`main`, `win`, `loop`などの`.text`セクション内にある関数のアドレスです。
 `tele`コマンドを使って、使えそうなアドレスがスタック内に落ちていないか探してみましょう:
 
 ```gef
@@ -290,7 +290,7 @@ $ nm ./fsb | grep -e win -e main
 
 ### Stack Baseのleak
 
-`.txt` baseがleakできたため、次は`stack`のアドレスをleakしましょう。
+`.text` baseがleakできたため、次は`stack`のアドレスをleakしましょう。
 なぜ`stack`のアドレスが必要なのかはのちほど説明します。
 
 x64のCalling Conventionを考えると、先程leakした`loop()`のRA(main)のすぐ上には`RBP`があるはずです:
