@@ -7,7 +7,7 @@ weight: 3
 
 ## Challenge
 
-[[Distribution File]](tcache-d5c0a4e85196bfd8132297ed0614d089559a605029d9bc3d31649b2498fa6b8c.tar.gz)
+[[Distribution File]](https://r2.p3land.smallkirby.com/tcache-d5c0a4e85196bfd8132297ed0614d089559a605029d9bc3d31649b2498fa6b8c.tar.gz)
 
 ```sh
 nc sc.skb.pw 49402
@@ -585,7 +585,7 @@ void *weak_variable (*__malloc_hook)
 
 ### 1. tcache2hook
 
-[[Distribution File]](tcache-d5c0a4e85196bfd8132297ed0614d089559a605029d9bc3d31649b2498fa6b8c.tar.gz)
+[[Distribution File]](https://r2.p3land.smallkirby.com/tcache-d5c0a4e85196bfd8132297ed0614d089559a605029d9bc3d31649b2498fa6b8c.tar.gz)
 
 ```sh
 nc sc.skb.pw 49402
