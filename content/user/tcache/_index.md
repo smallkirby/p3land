@@ -568,7 +568,7 @@ void *weak_variable (*__malloc_hook)
 よって、この変数を書き換えて任意のアドレスに設定することで、`malloc()`や`free()`の呼び出しをトリガーとして任意のアドレスにRIPを飛ばすことができます。
 
 {{< alert title="今は亡き..." color="info" >}}
-これらのhook関数は、最新のglibcでは消えてなく去っています。
+これらのhook関数は、最新のglibcでは消えてなくなっています。
 まぁアンダースコアがついた名前なので内部的・開発目的でしか使わないものだったのでしょう。
 
 消えたことが信じられない方は[glibc 2.35](https://elixir.bootlin.com/glibc/glibc-2.35/source/malloc/malloc.c)をgrepしてみてください。
