@@ -15,7 +15,7 @@ github_repo = 'https://github.com/smallkirby/p3land'
 github_branch = 'master'
 offlineSearch = true
 prism_syntax_highlighting = false
-navbar_log = true
+navbar_logo = true
 
 [params.ui]
 sidebar_menu_compact = true
