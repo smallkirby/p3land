@@ -48,7 +48,7 @@ const guardByBasicAuth = async ({ request, next, env }) => {
 
   const username = decoded.substring(0, index);
   const password = decoded.substring(index + 1);
-  if (username !== env.BASIC_USERNAME && password !== env.BASIC_PASSWORD) {
+  if (username !== env.BASIC_USERNAME || password !== env.BASIC_PASSWORD) {
     return new Response(
       'Invalid username or password.',
       {
