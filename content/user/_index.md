@@ -10,4 +10,20 @@ menu:
 weight: 10
 ---
 
-TBD
+## About This Section
+
+本セクションでは、userlandの基礎的な技術について触れていきます。
+
+主に以下のことを扱います:
+
+- stackの構造やx64のCalling Convention等の基礎知識
+- userlandにおける典型的な脆弱性とそのexploit手法
+- GDBおよびその拡張の基本的な使い方とデバッグ手法
+
+扱うテーマ自体はuserlandに固有なものもありますが、
+そこで扱う知識や技術・デバッグ手法等についてはkernel exploitに共通することが多いです。
+Kernel Exploitの前段階として実際に手を動かしながら進めてください。
+
+各章は、実際の問題(`Challenge`/`Exercise`)とそこで用いる知識・技術の解説から構成されています。
+Challengeは実際にリモートサーバ(`sc.skb.pw`)上で動いており、Flagが奪取できれば正解です。
+自身の現在持っている技術・スキルに合わせて進めてください。
