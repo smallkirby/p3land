@@ -283,7 +283,7 @@ Start              End                Size               Offset             Perm
 0x00007f96cadbd000 0x00007f96cae15000 0x0000000000058000 0x00000000001bd000 r-- /usr/lib/x86_64-linux-gnu/libc.so.6  <-  $r10, $r11
 ```
 
-libcbaseのアドレスが`0x7f96cac00000`であり、`__strcpy_avx2`のアドレスが先程の`got`コマンドで見たように`0x7f96cad9ee30`であることから、libcbaseと`__strcpy_avx2`の差分は`0x7f96cad9ee30 - 0x7f96cac00000 == 0x9ee30`となります。
+libcbaseのアドレスが`0x7f96cac00000`であり、`__strcpy_avx2`のアドレスが先程の`got`コマンドで見たように`0x7f96cad9ee30`であることから、libcbaseと`__strcpy_avx2`の差分は`0x7f96cad9ee30 - 0x7f96cac00000 == 0x19ee30`となります。
 
 {{< alert title="libcの配布について" color="warning" >}}
 ここまで進めて分かるとおり、このexploitではlibc固有の情報を使います。
