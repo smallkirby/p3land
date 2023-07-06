@@ -209,7 +209,7 @@ $rax = choice * (3 * 2^2 + 1) * 2^4
 しかし、1でoverflowをする時にはカナリアも巻き込んで書き換えてしまうことになります
 (カナリアと線形WRITEについては [#FSBのコラム](/user/fsb/#fsaでのwrite) を参照してください)。
 
-今回はノートのREAD機能もついているため、 **カナリアをleakしてOverflowの際にカナリアをカナリアの値で上書きすることにしましょう** 。具体的には、`buf`に対して0x50byteだけ入力することで`buf`内の文字列と`canary`が隣接します。その状態でノートを読むことで、`canary`をleakすることができます。
+今回はノートのREAD機能もついているため、 **カナリアをleakしてOverflowの際にカナリアをカナリアの値で上書きすることにしましょう** 。具体的には、`buf`に対して0x58byteだけ入力することで`buf`内の文字列と`canary`が隣接します。その状態でノートを読むことで、`canary`をleakすることができます。
 
 {{< alert title="Note: leakとNULL Termination" color="info" >}}
 exploitにおいて何らかの値をREADする際には、文字列のNULL Terminationに注意が必要です。
@@ -292,7 +292,7 @@ libcbaseのアドレスが`0x7f96cac00000`であり、`__strcpy_avx2`のアド�
 そのような場合には、配布ファイルに`libc.so`と`ld.so`が配布されています。
 実行時には`LD_PRELOAD=$(realpath ./libc.so) ./ld.so ./challenge`のようにすることで
 指定されたlibcをロードすることが可能になります。
-個人的には`readelf`等のツールでELFヘッダ中のローダ情報を書き換えてしまうのが良いと思います。
+個人的には`patchelf`等のツールでELFヘッダ中のローダ情報を書き換えてしまうのが良いと思います。
 
 Kernelの講義なので少しKernelの話をすると、PIEバイナリは実行時に以下のベースアドレスらへんにロードされます
 ([/arch/x86/include/asm/elf.h](https://elixir.bootlin.com/linux/latest/source/arch/x86/include/asm/elf.h#L237)):
