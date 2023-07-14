@@ -377,8 +377,8 @@ __SYSCALL(450, sys_set_mempolicy_home_node)
 
 その実体自体は`SYSCALL_DEFINE<N>`というマクロで定義されます。
 `<N>`は引数の数です。
-ここでは`read` sycallの実装を追うことにします。
-`read`の定義は[/fs/open.c]()で定義されています:
+ここでは`open` sycallの実装を追うことにします。
+`open`の定義は[/fs/open.c]()で定義されています:
 
 ```c
 SYSCALL_DEFINE3(open, const char __user *, filename, int, flags, umode_t, mode)
@@ -428,7 +428,7 @@ gef> hb *vfs_open
 {{< alert title="hardware breakpoint" color="info" >}}
 GDBでは`break(b)`と`hb`の2種類のbreakpointがあります。
 (筆者の理解が正しければ、)通常のbreakpointは、
-breakしたい命令を`int 3`命令を実行することで実現されています。
+breakしたい命令を`int 3`命令で上書きすることで実現されています。
 対して、hardware assisted breakpointでは[デバッグレジスタ](https://en.wikipedia.org/wiki/X86_debug_register)という特殊な用途なレジスタを使って、
 IPが該当アドレスに到達した時にCPU的にbreakするようになっています。
 何故かは知りませんが、筆者は過去に通常のbreakpointがkernel debugでうまく効かなかった経験があるため、
@@ -510,7 +510,7 @@ $7 = {
 }
 ```
 
-さて、このあと`vfs_open()`は`do_dentry_open)()`を呼び出します。
+さて、このあと`vfs_open()`は`do_dentry_open()`を呼び出します。
 
 ```c
 static int do_dentry_open(struct file *f,
@@ -665,7 +665,7 @@ static int misc_open(struct inode *inode, struct file *file)
 
 また同じような関数ですね。
 最初の`for`ループでは`misc_list`を辿って目的の`struct miscdevice`を探しています。
-ここで、`fro`を抜けた後の`c`を見てみましょう:
+ここで、`for`を抜けた後の`c`を見てみましょう:
 
 ```txt
 gef> p *c
@@ -690,16 +690,16 @@ $25 = {
 `replace_fops`によって`file->f_op`が`kwarmup_fops`に置き換わり、
 以降はこの`file`へのアクセスはこの`f_op`を使って行うことができます。
 ちなみに、`file.private_data`には登録した`struct miscdevice`が入ります。
-今は気にしないでもらって大丈夫ですが、のちのち使いう可能性があるかもしれないです。
+今は気にしないでもらって大丈夫ですが、のちのち使う可能性があるかもしれないです。
 あとは登録したmiscdeviceの`fops`に登録されている`open`が呼ばれるだけです。
 しかし、本LKMでは`open`を登録していないので、何も専用の処理はされません。
 ただしそれでもユーザにエラーなく`fd`は返されます。
 
-さて、ここまで`open`システムコールがLKMをopenするまでの流れを追ってきました。
+さて、ここまで`open`システムコールが`miscdevice`をopenするまでの流れを追ってきました。
 これ以降はこんなに詳しく順を追ったコードリーディングの説明はしませんが、
 実際にコードを読んで流れを追っていくことはとても勉強になります。
 また、何をしてるかわからないコードを読んで唸るよりも、
 debug symbolつきのvmlinuxをGDBに食べさせてbacktraceを見るなりしたほうがよっぽど効率的ということも分かっていただけたでしょうか。
-ぜひこれからも少しでも気になったこと・分からないことがあれば、このような方法でコードリーディングをして
+ぜひこれからも少しでも気になったこと・分からないことがあれば、このような方法でコードリーディングをしてみてください。
 
 ## `ioctl`と脆弱性
