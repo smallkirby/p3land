@@ -14,8 +14,8 @@ description = "P3LAND: Dreaming of Necropolis"
 github_repo = 'https://github.com/smallkirby/p3land'
 github_branch = 'master'
 offlineSearch = true
-prism_syntax_highlighting = false
 navbar_logo = true
+guessSyntax = true
 
 [params.ui]
 sidebar_menu_compact = true
@@ -45,3 +45,11 @@ breadcrumb_disable = false
 
 [outputs]
 section = ["HTML", "RSS"]
+
+[markup]
+  [markup.goldmark]
+    [markup.goldmark.renderer]
+      unsafe = true
+  [markup.highlight]
+      style = "gruvbox"
+			linenos = true
