@@ -213,7 +213,7 @@ MSR_GS_BASE (0xc0000101): 0xffff88800f600000 (=0b1111_1111_1111_1111_1000_1000_1
 これが、このCPUの`PER_CPU_VAR`領域となります。
 
 続くL7で、この`PER_CPU_VAR`を使って`RSP`の値を退避させています。
-x64では**TSS (Task State Segment)**と呼ばれる領域にタスク情報を格納することになっており、
+x64では **TSS (Task State Segment)** と呼ばれる領域にタスク情報を格納することになっており、
 該当領域は以下のように`cpu_tss_rw`変数として定義されています:
 
 ![tss](img/tss.png)
