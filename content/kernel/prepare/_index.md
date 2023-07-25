@@ -187,9 +187,12 @@ vim /mnt/hoge/etc/inittab
 
 `inittab`中の以下の部分を修正してください
 
-```inittab
+```txt
+# このようになっている箇所を2行ともコメントアウト
+ttyS0::respawn:/sbin/getty -L ttyS0 115200 vt100 # GENERIC_SERIAL
 tty1::respawn:/sbin/getty -L  tty1 0 vt100 # QEMU graphical window
-(fix)=>
+
+# 以下を追加
 ::respawn:-/bin/sh
 ```
 
