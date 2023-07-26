@@ -74,7 +74,7 @@ $ file ./vmlinux
 実行後、通常のシステムでは実体のある(backed)ファイルシステムをマウントしますが、
 配布したkernelではそのまま`initramfs`を使い続けます。
 そのため、ファイルシステムに及ぼした変更は一切保存されません。
-`init`の起動部分は`init_kernel@/init/main.c`関数で定義されています:
+`init`の起動部分は`kernel_init`関数([/init/main.c](https://elixir.bootlin.com/linux/v5.15/source/init/main.c#L1497))で定義されています:
 
 ```c
 static char *ramdisk_execute_command = "/init";
@@ -357,7 +357,7 @@ crw-rw-rw-    1 root     root       10, 125 Jul 14 08:12 /dev/kwarmup
 `.fops`は`/dev/kwarmup`に対するファイル操作の関数テーブルです。
 
 良い機会なのでデバイスファイルに対するファイル操作のkernelにおける処理の流れを簡単に追ってみましょう。
-x64において、syscall一覧は[/arch/x86/entry/syscall_64.c]()で定義されます:
+x64において、syscall一覧は[/arch/x86/entry/syscall_64.c](https://elixir.bootlin.com/linux/v5.15/source/arch/x86/entry/syscall_64.c)で定義されます:
 
 ```c
 asmlinkage const sys_call_ptr_t sys_call_table[] = {
@@ -378,7 +378,7 @@ __SYSCALL(450, sys_set_mempolicy_home_node)
 その実体自体は`SYSCALL_DEFINE<N>`というマクロで定義されます。
 `<N>`は引数の数です。
 ここでは`open` sycallの実装を追うことにします。
-`open`の定義は[/fs/open.c]()で定義されています:
+`open`の定義は[/fs/open.c](https://elixir.bootlin.com/linux/v5.15/source/fs/open.c#L1220)で定義されています:
 
 ```c
 SYSCALL_DEFINE3(open, const char __user *, filename, int, flags, umode_t, mode)
@@ -390,7 +390,7 @@ SYSCALL_DEFINE3(open, const char __user *, filename, int, flags, umode_t, mode)
 ```
 
 ここからはさらに処理が分岐していきます。
-途中は省略することにして、なんやかんや`do_open()`([/fs/namei.c]())において`vfs_open()`([/fs/open.c]())が呼ばれます。
+途中は省略することにして、なんやかんや`do_open()`([/fs/namei.c](https://elixir.bootlin.com/linux/v5.15/source/fs/namei.c#L3384))において`vfs_open()`([/fs/open.c](https://elixir.bootlin.com/linux/v5.15/source/fs/open.c#L942))が呼ばれます。
 ここまで来ると、openするファイルに応じた関数ポインタ等も出てくるため、きっとソースコードの上だけで処理を追うのはしんどくなってくるはずです。
 そんなときには、**GDBで実際に手を動かしながら処理を追っていきましょう**。
 
@@ -510,7 +510,7 @@ $7 = {
 }
 ```
 
-さて、このあと`vfs_open()`は`do_dentry_open()`を呼び出します。
+さて、このあと`vfs_open()`は`do_dentry_open`([/fs/open.c](https://elixir.bootlin.com/linux/v5.15/source/fs/open.c#L768))を呼び出します。
 
 ```c
 static int do_dentry_open(struct file *f,
@@ -551,7 +551,7 @@ const struct file_operations def_chr_fops = {
 };
 ```
 
-これは`chrdev_open`([/fs/char_dev.c]())を指しているようですね:
+これは`chrdev_open`([/fs/char_dev.c](https://elixir.bootlin.com/linux/v5.15/source/fs/char_dev.c#L373))を指しているようですね:
 
 ```c
 static int chrdev_open(struct inode *inode, struct file *filp)
@@ -639,7 +639,7 @@ $19 = {
 
 随分と段階を踏んでいてややこしいですが、そもそもVFSというのが諸々のファイルの差異を吸収して
 統一APIを提供するためのものなので仕方がないですね。
-`misc_fops->open`は`misc_open`([/drivers/char/misc.c]())です:
+`misc_fops->open`は`misc_open`([/drivers/char/misc.c](https://elixir.bootlin.com/linux/v5.15/source/drivers/char/misc.c#L100))です:
 
 ```c
 static int misc_open(struct inode *inode, struct file *file)
@@ -850,8 +850,8 @@ userland exploitにおける目標は、ユーザシェルを取ることでし�
 そもそも、rootを取るとはどういうことでしょうか。
 言い換えると、プロセスのUIDはどのようにして定義されているのでしょうか。
 
-Linuxにおいて、各プロセスは`struct task_struct`([/include/linux/sched.h]())という構造体で表現されます。
-この`task_struct`は、`cred`という`struct cred`([/include/linux/cred.h]())型のフィールドを保持します。
+Linuxにおいて、各プロセスは`struct task_struct`([/include/linux/sched.h](https://elixir.bootlin.com/linux/v5.15/source/include/linux/sched.h#L723))という構造体で表現されます。
+この`task_struct`は、`cred`という`struct cred`([/include/linux/cred.h](https://elixir.bootlin.com/linux/v5.15/source/include/linux/cred.h#L110))型のフィールドを保持します。
 この`cred`がプロセスのUIDを表現する構造体です:
 
 ```c
@@ -874,7 +874,7 @@ struct cred {
 }
 ```
 
-`commit_creds()`([/kernel/cred.c]())は、`task_struct`に対して新しい`cred`を上書きします:
+`commit_creds()`([/kernel/cred.c](https://elixir.bootlin.com/linux/v5.15/source/kernel/cred.c#L447))は、`task_struct`に対して新しい`cred`を上書きします:
 
 ```c
 int commit_creds(struct cred *new)
@@ -892,7 +892,7 @@ int commit_creds(struct cred *new)
 
 ### 1. `init_cred`を使う
 
-`init_cred`([/kernel/cred.c]())はPID0プロセス用の`task_struct`が保持する`cred`です。
+`init_cred`([/kernel/cred.c](https://elixir.bootlin.com/linux/v5.15/source/kernel/cred.c#L41))はPID0プロセス用の`task_struct`が保持する`cred`です。
 必然的にUID0を持っています。
 
 ```c
@@ -915,7 +915,7 @@ struct cred init_cred = {
 
 ### 2. `prepare_kernel_cred(0)`を使う
 
-`prepare_kernel_cred(0)`([/kernel/cred.c]())は、引数に渡された`task_struct`をもとに新しい`cred`を作成します。
+`prepare_kernel_cred(0)`([/kernel/cred.c](https://elixir.bootlin.com/linux/v5.15/source/kernel/cred.c#L718))は、引数に渡された`task_struct`をもとに新しい`cred`を作成します。
 処理の詳細は読者におまかせしますが、`NULL`を渡した場合には`init_cred`を使って新しい`cred`を作成することになっています。
 よって、先程の方法と同じく`commit_creds(prepare_kernel_cred(0))`を呼び出すことで、UID0の`cred`を作成して上書きすることができます。
 
