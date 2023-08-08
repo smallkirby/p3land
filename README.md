@@ -2,6 +2,10 @@
 
 Learning Platform for SecurityCamp2023 "手を動かして理解するLinux Kernel Exploit".
 
+## Note
+
+For challenges and slides used in the lecture, please refer to [seccamp23c2-assets](https://github.com/smallkirby/seccamp23c2-assets) repository.
+
 ## Development
 
 ```bash
