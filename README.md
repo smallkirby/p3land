@@ -22,3 +22,7 @@ We appreciate your contribution to add, fix, or improve our contents.
 - Release: `release` branch, deployed to [p3land.pages.dev](https://p3land.pages.dev/)
 
 Commits are pushed to `master` branch, then merged to `release` branch by manually.
+
+## Thanks
+
+This project was made possible by the contribution of [TSG](https://tsg.ne.jp/) members.
