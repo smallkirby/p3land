@@ -1,10 +1,16 @@
 # 🌏 P3LAND 🎀
 
+Learning Platform for SecurityCamp2023 "手を動かして理解するLinux Kernel Exploit".
+
 ## Development
 
 ```bash
 npm run dev
 ```
+
+## Contribution
+
+We appreciate your contribution to add, fix, or improve our contents.
 
 ## Deployment
 
