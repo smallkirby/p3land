@@ -59,4 +59,4 @@ Cトラックは複数の講義からなるオムニバス形式です。
 
 ## 📝 Note
 
-- このサイトがパスワード等の認証で保護されている場合、パスワードは誰にも教えないでください
+- 講義に利用した資料は以下のリポジトリで公開しています: [smallkirby/seccamp23c2-assets](https://github.com/smallkirby/seccamp23c2-assets)
