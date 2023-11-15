@@ -14,6 +14,11 @@ menu:
     pre: <i class='fa-solid fa-book'></i>
 ---
 
+{{< alert title="Warning: 問題サーバについて" color="warning" >}}
+問題サーバとして用意していた`sc.skb.pw`は閉鎖しました。
+exploitを試したい場合には、問題ファイルをダウンロードした後、Docker等を使って自分の環境で実行してください。
+{{< /alert >}}
+
 ## 👀 About This Site
 
 このサイトは[セキュリティキャンプ全国大会2023](https://www.ipa.go.jp/jinzai/security-camp/2023/zenkoku/index.html)の[C2 手を動かして理解するLinux Kernel Exploit](https://www.ipa.go.jp/jinzai/security-camp/2023/zenkoku/program_list_cd.html)の事前学習で利用されます。
